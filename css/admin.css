@@ -1,0 +1,22 @@
+.cmb-type-text-url input.cmb2-text-url,
+.cmb-type-text input.regular-text {
+  width: 100%;
+}
+
+#tab-panel-shortcodes ul {
+  list-style: none;
+}
+#tab-panel-shortcodes ul li {
+  list-style: none;
+  margin: 0 0 1em;
+  background-color: white; /* #f2f1eb; */
+  border: 1px solid #BBBBBB;
+  font-size: 1.1em;
+  padding: .75em;
+}
+#tab-panel-shortcodes li p.help-desc {
+  margin-bottom: 0;
+}
+#tab-panel-shortcodes li p.help-desc code {
+  font-size: .9em;
+}

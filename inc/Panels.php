@@ -152,6 +152,27 @@ class Panels {
   }
 
   /******************************************************************************
+   *  Localist panel
+   */
+  protected function localist_panel() {
+    $panel = $this->panel_template( [
+          'slug'        => 'localist'
+        , 'label'       => 'Localist Events'
+        , 'description' => 'Display Localist event widget.'
+      ] );
+
+    $panel->add_field( new Fields\TextArea( [
+        'name'          => 'localist_widget_html'
+      , 'label'         => __( 'Widget HTML', 'stanford-text-domain' )
+      , 'description'   => __( 'Paste the HTML from Localist\'s Widget Builder', 'stanford-text-domain' )
+      , 'richtext'      => FALSE
+      , 'media_buttons' => FALSE
+    ] ) );
+
+    return $panel;
+  }
+
+  /******************************************************************************
    *  Events panel
    */
   protected function events_panel() {

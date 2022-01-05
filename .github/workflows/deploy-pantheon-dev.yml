@@ -1,0 +1,218 @@
+### Deploy pantheon branch to Homesite dev environment on Pantheon
+
+# Secrets used:
+# - DEV_DEPLOY_REPO - ssh url of Pantheon's repo
+#   Starts with ssh://codeserver.dev.
+#   Ends with /~/repository.git
+# - SSH_DEPLOY_PRIVATE_KEY - SSH Private Key allowed to deploy to DEV_DEPLOY_REPO
+#   Starts with -----BEGIN OPENSSH PRIVATE KEY-----
+#   Ends with -----END OPENSSH PRIVATE KEY-----
+# - PANTHEON_MACHINE_TOKEN - Pantheon-generated machine token to allow terminus to
+#   set the dev environment to git mode
+# - SLACK_DEPLOY_WEBHOOK - url for posting status updates to desired Slack channel
+
+name: Dev Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - pantheon
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      PANTHEON_ENV: stanford-homesite.dev # the site.env on Pantheon we're deploying to
+      SOURCE_REPO_FOLDER: ./build # where this repo gets checked out
+      TARGET_REPO_FOLDER: ./deploy # where Pantheon's repo gets checked out
+      TARGET_COMPONENT_FOLDER: wp-content/plugins/stanford-homesite # where in Pantheon's repo this code should go
+      DEPLOY_REPO: ${{ secrets.DEV_DEPLOY_REPO }} # the ssh url of Pantheon's repo
+      INCOMING_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK }} # the url of the Slack channel to post updates to
+      COMMIT_MSG: ${{ github.event.head_commit.message }}
+
+    steps:
+      ### Setup
+
+      - name: Extract branch name
+        shell: bash
+        run: echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+        id: extract_branch
+
+      - name: Slack notification
+        uses: tokorom/action-slack-incoming-webhook@v1.1.4
+        with:
+          blocks: |
+            [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "Deploy to Pantheon"
+                }
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Initiated by*\n${{ github.actor }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Initiating event*\n${{ github.event_name }}"
+                  }
+                ]
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Repo*\n${{ github.repository }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Branch*\n${{ steps.extract_branch.outputs.branch }}"
+                  }
+                ]
+              },
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Commit SHA*\n${{ github.sha }}"
+                  },
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Commit Message*\n${{ env.COMMIT_MSG }}"
+                  }
+                ]
+              }
+            ]
+
+      ### Deploy
+      - name: Install PHP
+        uses: shivammathur/setup-php@master
+        with:
+          php-version: '7.3'
+
+      - name: Install Terminus
+        uses: kopepasah/setup-pantheon-terminus@1.0.0
+        with:
+          pantheon-machine-token: ${{ secrets.PANTHEON_MACHINE_TOKEN }}
+
+      - name: Set Pantheon environment to git mode
+        run: terminus connection:set ${{ env.PANTHEON_ENV }} git
+
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.SSH_DEPLOY_PRIVATE_KEY }}
+          name: id_rsa # optional
+          known_hosts: codeserver.dev.5dfa8617-1517-4b36-9369-893e98466d05.drush.in
+          config: |
+            Host *.drush.in
+                User git
+                IdentityFile ~/.ssh/id_rsa
+                ForwardAgent yes
+                StrictHostKeyChecking no
+
+      - name: Checkout development repo
+        uses: actions/checkout@v2
+        with:
+          path: ${{ env.SOURCE_REPO_FOLDER }}
+          ref: ${{ github.ref }}
+
+      - name: Checkout server repo
+        run: |
+          git clone ${{ env.DEPLOY_REPO }} ${{ env.TARGET_REPO_FOLDER }}
+          cd ${{ env.TARGET_REPO_FOLDER }}
+          git config user.email "ucomm-devops@stanford.edu"
+          git config user.name "devops"
+
+      - name: Sync development repo to server repo
+        run: |
+          rsync -rpv --delete ${{env.SOURCE_REPO_FOLDER}}/ ${{env.TARGET_REPO_FOLDER}}/${{env.TARGET_COMPONENT_FOLDER}} \
+            --exclude=.git \
+            --exclude=.github \
+            --exclude=.gitmodules \
+            --exclude=.gitignore \
+            --exclude=.htaccess \
+            --exclude=.DS_Store \
+            --exclude=.babelrc \
+            --exclude=.editorconfig \
+            --exclude=.eslintrc
+
+      - name: Push server repo
+        working-directory: ${{ env.TARGET_REPO_FOLDER }}
+        run: |
+          echo 'Deploying ${{ github.repository }}, ${{ steps.extract_branch.outputs.branch }} branch, to Pantheon'
+          git add -Av
+          git commit --allow-empty --allow-empty-message -m '${{ env.COMMIT_MSG }}'
+          git push origin master
+
+      ### Notify Slack
+
+      - name: Slack - success
+        if: ${{ success() }}
+        uses: tokorom/action-slack-incoming-webhook@v1.1.4
+        continue-on-error: true
+        with:
+          blocks: |
+            [
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Status*\n:white_check_mark: Success"
+                  }
+                ]
+              },
+              {
+                "type": "divider"
+              }
+            ]
+      - name: Slack - failure
+        if: ${{ failure() }}
+        uses: tokorom/action-slack-incoming-webhook@v1.1.4
+        continue-on-error: true
+        with:
+          blocks: |
+            [
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Status*\n:x: Failed"
+                  }
+                ]
+              },
+              {
+                "type": "divider"
+              }
+            ]
+      - name: Slack - cancelled
+        if: ${{ cancelled() }}
+        uses: tokorom/action-slack-incoming-webhook@v1.1.4
+        continue-on-error: true
+        with:
+          blocks: |
+            [
+              {
+                "type": "section",
+                "fields": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "*Status*\n:stop: Cancelled"
+                  }
+                ]
+              },
+              {
+                "type": "divider"
+              }
+            ]
